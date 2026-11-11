@@ -34,6 +34,10 @@ class OFP_Settings {
 			'replicate_token'    => '',
 			'replicate_model'    => 'nightmareai/real-esrgan',
 			'enhance_mode'       => 'auto',   // auto (photos of people only) | on (every file) | off
+			'enhance_engine'     => 'auto',   // auto (Gemini, then deAPI) | gemini | deapi
+			'gemini_key'         => '',
+			'gemini_model'       => 'gemini-3.1-flash-image',
+			'gemini_size'        => '2K',     // 1K | 2K | 4K
 			'enhance_model'      => 'QwenImageEdit_Plus_NF4',
 			'enhance_prompt'     => self::default_enhance_prompt(),
 			'enhance_negative'   => self::default_enhance_negative(),
@@ -70,6 +74,7 @@ class OFP_Settings {
 		return array(
 			'freeai_key'      => 'OFP_FREEAI_KEY',
 			'deapi_key'       => 'OFP_DEAPI_KEY',
+			'gemini_key'      => 'OFP_GEMINI_KEY',
 			'replicate_token' => 'OFP_REPLICATE_TOKEN',
 			'anthropic_key'   => 'OFP_ANTHROPIC_KEY',
 		);
@@ -166,6 +171,12 @@ class OFP_Settings {
 		}
 		$out['local_timeout_min'] = min( 240, max( 1, (int) $out['local_timeout_min'] ) );
 		$out['enhance_mode']        = in_array( $out['enhance_mode'], array( 'auto', 'on', 'off' ), true ) ? $out['enhance_mode'] : 'auto';
+		$out['enhance_engine']      = in_array( $out['enhance_engine'], array( 'auto', 'gemini', 'deapi' ), true ) ? $out['enhance_engine'] : 'auto';
+		$out['gemini_size']         = in_array( $out['gemini_size'], array( '1K', '2K', '4K' ), true ) ? $out['gemini_size'] : '2K';
+		$out['gemini_model']        = preg_replace( '/[^A-Za-z0-9_\-.]/', '', $out['gemini_model'] );
+		if ( '' === $out['gemini_model'] ) {
+			$out['gemini_model'] = $d['gemini_model'];
+		}
 		$out['auto_update']         = in_array( $out['auto_update'], array( 'on', 'off' ), true ) ? $out['auto_update'] : 'on';
 		$out['enhance_timeout_min'] = min( 60, max( 2, (int) $out['enhance_timeout_min'] ) );
 		$out['enhance_model']       = preg_replace( '/[^A-Za-z0-9_\-.]/', '', $out['enhance_model'] );

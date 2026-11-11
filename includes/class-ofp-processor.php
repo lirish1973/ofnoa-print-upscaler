@@ -85,7 +85,7 @@ class OFP_Processor {
 		if ( get_transient( 'ofp_lock' ) ) {
 			return;
 		}
-		set_transient( 'ofp_lock', 1, 170 );
+		set_transient( 'ofp_lock', 1, 320 );
 		if ( function_exists( 'set_time_limit' ) ) {
 			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		}
@@ -129,7 +129,7 @@ class OFP_Processor {
 		if ( get_transient( 'ofp_lock' ) ) {
 			return false;
 		}
-		set_transient( 'ofp_lock', 1, 170 );
+		set_transient( 'ofp_lock', 1, 320 );
 		if ( function_exists( 'set_time_limit' ) ) {
 			@set_time_limit( 300 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors
 		}
@@ -242,7 +242,7 @@ class OFP_Processor {
 		if ( $o['enhance'] && 'on' !== OFP_Settings::get( 'enhance_mode' ) ) {
 			// By-type mode: the prompt is only safe for photographs of people.
 			if ( ! OFP_Engines::enhance_ready() ) {
-				$skip = 'שיפור בפרומפט דורש מפתח deAPI';
+				$skip = 'שיפור בפרומפט דורש מפתח Gemini או deAPI';
 			} else {
 				$c = OFP_Claude::classify( $source );
 				if ( is_wp_error( $c ) ) {
@@ -264,7 +264,10 @@ class OFP_Processor {
 			self::save_report( $job, $report );
 			OFP_Jobs::log( $job->id, 'שיפור בפרומפט דולג: ' . $skip );
 		} elseif ( $o['enhance'] ) {
-			$res = OFP_Engines::enhance_start( $source );
+			$res = OFP_Engines::enhance_start( $source, $dir );
+			foreach ( is_wp_error( $res ) ? array() : (array) $res['notes'] as $note ) {
+				OFP_Jobs::log( $job->id, 'שיפור בפרומפט – ' . $note . ' – עוברים למנוע הבא' );
+			}
 			if ( is_wp_error( $res ) ) {
 				$report['enhance'] = array(
 					'status' => 'skipped',
@@ -276,12 +279,18 @@ class OFP_Processor {
 				$report['enhance'] = array(
 					'status'  => 'running',
 					'started' => time(),
+					'engine'  => $res['engine'],
 					'model'   => $res['model'],
 					'width'   => $res['width'],
 					'height'  => $res['height'],
 				);
 				self::save_report( $job, $report );
-				OFP_Jobs::log( $job->id, 'שיפור בפרומפט התחיל (' . $res['model'] . ', ' . $res['width'] . '×' . $res['height'] . ')' );
+				if ( ! empty( $res['file'] ) ) {
+					// Synchronous engine (Gemini): the enhanced image is already here.
+					OFP_Jobs::log( $job->id, 'שיפור בפרומפט בוצע ב-' . OFP_Engines::enhance_label( $res['engine'] ) . ' (' . $res['model'] . ')' );
+					return self::finish_enhance( OFP_Jobs::get( $job->id ), $res['file'] );
+				}
+				OFP_Jobs::log( $job->id, 'שיפור בפרומפט התחיל ב-' . OFP_Engines::enhance_label( $res['engine'] ) . ' (' . $res['model'] . ', ' . $res['width'] . '×' . $res['height'] . ')' );
 				return self::advance( $job, 'enhancing', array( 'prediction_id' => substr( 'enhance|' . $res['handle'], 0, 80 ) ) );
 			}
 		} else {
@@ -305,12 +314,23 @@ class OFP_Processor {
 		if ( 'processing' === $p ) {
 			return;
 		}
+		return self::finish_enhance( $job, $p );
+	}
+
+	/** $p is the enhanced file from any engine, or a WP_Error. Falls back to a plain upscale on failure. */
+	private static function finish_enhance( $job, $p ) {
+		$dir    = OFP_Jobs::job_dir( $job );
+		$report = self::report( $job );
 		if ( ! is_wp_error( $p ) ) {
 			// The model snaps its output to a size grid – restore the exact aspect ratio of the source.
 			list( $sw, $sh ) = OFP_Image::size( $job->source_path );
 			list( $ew, $eh ) = OFP_Image::size( $p );
 			if ( ! $sw || ! $ew ) {
 				$p = new WP_Error( 'ofp_engine', 'תוצאת השיפור אינה תמונה תקינה' );
+			} elseif ( abs( ( $ew / $eh ) / ( $sw / $sh ) - 1 ) > 0.04 ) {
+				// A different shape means the model re-framed or cropped the picture – never stretch that back.
+				wp_delete_file( $p );
+				$p = new WP_Error( 'ofp_engine', "המודל החזיר תמונה ביחס ממדים אחר ({$ew}×{$eh} מול מקור {$sw}×{$sh})" );
 			} else {
 				$long = max( $ew, $eh );
 				$nw   = $sw >= $sh ? $long : max( 1, (int) round( $long * $sw / $sh ) );

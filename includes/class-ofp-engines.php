@@ -12,8 +12,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  *   local     – your own PC running realesrgan-ncnn-vulkan via the worker script (free)
  *   replicate – Replicate nightmareai/real-esrgan (paid, ~$0.0024/run)
  *
- * Separate from the upscale chain: an optional prompt-guided ENHANCEMENT step (deAPI Image Edit)
- * that runs before the upscale – see enhance_start() / enhance_poll().
+ * Separate from the upscale chain: an optional prompt-guided ENHANCEMENT step that runs before the
+ * upscale – Google Gemini image editing ("Nano Banana", synchronous) and/or deAPI Image Edit (async).
+ * See enhance_start() / enhance_poll().
  *
  * start() returns array( 'handle' => string ) for async engines or array( 'file' => path ) when the
  * result is already on disk. poll() returns 'processing', a path to the downloaded result, or WP_Error.
@@ -294,8 +295,187 @@ class OFP_Engines {
 
 	/* ---------------- prompt-guided enhancement (deAPI Image Edit) ---------------- */
 
+	const GEMINI = 'https://generativelanguage.googleapis.com';
+
+	/** Enhancement engines to try, in order, given the setting and which keys exist. */
+	public static function enhance_order() {
+		$pref = (string) OFP_Settings::get( 'enhance_engine' );
+		$have = array(
+			'gemini' => (bool) OFP_Settings::secret( 'gemini_key' ),
+			'deapi'  => (bool) OFP_Settings::secret( 'deapi_key' ),
+		);
+		$try  = 'gemini' === $pref ? array( 'gemini' ) : ( 'deapi' === $pref ? array( 'deapi' ) : array( 'gemini', 'deapi' ) );
+		return array_values(
+			array_filter(
+				$try,
+				function ( $e ) use ( $have ) {
+					return $have[ $e ];
+				}
+			)
+		);
+	}
+
 	public static function enhance_ready() {
-		return (bool) OFP_Settings::secret( 'deapi_key' );
+		return (bool) self::enhance_order();
+	}
+
+	public static function enhance_label( $engine ) {
+		return 'gemini' === $engine ? 'Gemini' : ( 'deapi' === $engine ? 'deAPI' : $engine );
+	}
+
+	/** One generateContent call. Returns the decoded body or WP_Error (with the HTTP code as error data). */
+	private static function gemini_call( $version, $model, $body ) {
+		$res = wp_remote_post(
+			self::GEMINI . '/' . $version . '/models/' . rawurlencode( $model ) . ':generateContent',
+			array(
+				'headers' => array(
+					'x-goog-api-key' => OFP_Settings::secret( 'gemini_key' ),
+					'Content-Type'   => 'application/json',
+				),
+				'body'    => wp_json_encode( $body ),
+				'timeout' => 240,
+			)
+		);
+		if ( is_wp_error( $res ) ) {
+			return new WP_Error( 'ofp_engine', 'Gemini: ' . $res->get_error_message(), 0 );
+		}
+		$code = (int) wp_remote_retrieve_response_code( $res );
+		$json = json_decode( wp_remote_retrieve_body( $res ), true );
+		if ( $code < 200 || $code >= 300 ) {
+			$msg = is_array( $json ) && isset( $json['error']['message'] ) ? $json['error']['message'] : substr( (string) wp_remote_retrieve_body( $res ), 0, 200 );
+			return new WP_Error( 'ofp_engine', 'Gemini ' . $code . ': ' . wp_strip_all_tags( substr( (string) $msg, 0, 300 ) ), $code );
+		}
+		return is_array( $json ) ? $json : new WP_Error( 'ofp_engine', 'Gemini: תשובה לא תקינה', $code );
+	}
+
+	/**
+	 * Gemini image editing (synchronous). The output keeps the input's aspect ratio by default, so only
+	 * the size tier is requested. Google's docs show two spellings of the image options and two API
+	 * versions, so a rejected request is retried with the other spelling / version, and finally with
+	 * no options at all (the model's defaults) before giving up.
+	 * Returns array( 'file' => path, 'model' => slug ) or WP_Error.
+	 */
+	public static function gemini_enhance( $input, $dir ) {
+		$model = (string) OFP_Settings::get( 'gemini_model' );
+		$b64   = OFP_Image::b64_view( $input, 3072 );
+		if ( '' === $b64 ) {
+			return new WP_Error( 'ofp_engine', 'Gemini: לא ניתן לקרוא את התמונה' );
+		}
+		$prompt = (string) OFP_Settings::get( 'enhance_prompt' );
+		$neg    = trim( (string) OFP_Settings::get( 'enhance_negative' ) );
+		if ( '' !== $neg ) {
+			$prompt .= "\n\nNEGATIVE INSTRUCTIONS: " . $neg;
+		}
+		$contents = array(
+			array(
+				'parts' => array(
+					array( 'text' => $prompt ),
+					array(
+						'inline_data' => array(
+							'mime_type' => 'image/jpeg',
+							'data'      => $b64,
+						),
+					),
+				),
+			),
+		);
+		$size     = (string) OFP_Settings::get( 'gemini_size' );
+		$configs  = array(
+			array(
+				'responseModalities' => array( 'TEXT', 'IMAGE' ),
+				'responseFormat'     => array( 'image' => array( 'imageSize' => $size ) ),
+			),
+			array(
+				'responseModalities' => array( 'TEXT', 'IMAGE' ),
+				'imageConfig'        => array( 'imageSize' => $size ),
+			),
+			null,
+		);
+		$res      = null;
+		foreach ( array( 'v1', 'v1beta' ) as $version ) {
+			foreach ( $configs as $cfg ) {
+				$body = array( 'contents' => $contents );
+				if ( $cfg ) {
+					$body['generationConfig'] = $cfg;
+				}
+				$res = self::gemini_call( $version, $model, $body );
+				if ( ! is_wp_error( $res ) ) {
+					break 2;
+				}
+				$code = (int) $res->get_error_data();
+				if ( 404 === $code ) {
+					continue 2; // model not served on this API version – try the other one.
+				}
+				if ( 400 !== $code ) {
+					return $res; // key, quota, safety, network: retrying with other options will not help.
+				}
+			}
+		}
+		if ( is_wp_error( $res ) ) {
+			return $res;
+		}
+		$image = '';
+		$text  = '';
+		$parts = isset( $res['candidates'][0]['content']['parts'] ) && is_array( $res['candidates'][0]['content']['parts'] ) ? $res['candidates'][0]['content']['parts'] : array();
+		foreach ( $parts as $part ) {
+			if ( ! empty( $part['thought'] ) ) {
+				continue; // interim "thinking" images are not the result.
+			}
+			$inline = isset( $part['inlineData'] ) ? $part['inlineData'] : ( isset( $part['inline_data'] ) ? $part['inline_data'] : null );
+			if ( is_array( $inline ) && ! empty( $inline['data'] ) ) {
+				$image = (string) $inline['data']; // keep the last image part.
+			} elseif ( isset( $part['text'] ) ) {
+				$text .= (string) $part['text'];
+			}
+		}
+		if ( '' === $image ) {
+			$why = isset( $res['promptFeedback']['blockReason'] ) ? 'נחסם (' . $res['promptFeedback']['blockReason'] . ')' : ( isset( $res['candidates'][0]['finishReason'] ) ? 'finishReason ' . $res['candidates'][0]['finishReason'] : 'לא הוחזרה תמונה' );
+			return new WP_Error( 'ofp_engine', 'Gemini: ' . $why . ( '' !== trim( $text ) ? ' – ' . wp_strip_all_tags( substr( trim( $text ), 0, 160 ) ) : '' ) );
+		}
+		$bin = base64_decode( $image, true );
+		if ( false === $bin || strlen( $bin ) < 100 ) {
+			return new WP_Error( 'ofp_engine', 'Gemini: נתוני התמונה פגומים' );
+		}
+		$dest = $dir . '/enhance-raw.img';
+		file_put_contents( $dest, $bin ); // phpcs:ignore WordPress.WP.AlternativeFunctions
+		list( $w, $h ) = OFP_Image::size( $dest );
+		if ( ! $w || ! $h ) {
+			wp_delete_file( $dest );
+			return new WP_Error( 'ofp_engine', 'Gemini: הקובץ שהוחזר אינו תמונה' );
+		}
+		return array(
+			'file'   => $dest,
+			'model'  => $model,
+			'width'  => $w,
+			'height' => $h,
+		);
+	}
+
+	public static function gemini_test() {
+		$model = (string) OFP_Settings::get( 'gemini_model' );
+		$last  = null;
+		foreach ( array( 'v1', 'v1beta' ) as $version ) {
+			$res = wp_remote_get(
+				self::GEMINI . '/' . $version . '/models/' . rawurlencode( $model ),
+				array(
+					'headers' => array( 'x-goog-api-key' => OFP_Settings::secret( 'gemini_key' ) ),
+					'timeout' => 20,
+				)
+			);
+			if ( is_wp_error( $res ) ) {
+				return new WP_Error( 'ofp_engine', $res->get_error_message() );
+			}
+			$code = (int) wp_remote_retrieve_response_code( $res );
+			$json = json_decode( wp_remote_retrieve_body( $res ), true );
+			if ( 200 === $code ) {
+				return 'המודל ' . $model . ' זמין (' . $version . ')';
+			}
+			$last = new WP_Error( 'ofp_engine', $code . ': ' . ( isset( $json['error']['message'] ) ? wp_strip_all_tags( substr( (string) $json['error']['message'], 0, 200 ) ) : 'שגיאה' ) );
+			if ( 404 !== $code ) {
+				break;
+			}
+		}
+		return $last;
 	}
 
 	/** Model entry from GET /models (cached), or WP_Error. */
@@ -363,9 +543,32 @@ class OFP_Engines {
 		return array( $ow, $oh );
 	}
 
-	/** Start the enhancement. Returns array( 'handle', 'width', 'height', 'model' ) or WP_Error. */
-	public static function enhance_start( $input ) {
-		if ( ! self::enhance_ready() ) {
+	/**
+	 * Start the enhancement with the first engine that accepts the job.
+	 * Returns array( 'engine', 'model', 'width', 'height', 'notes' ) plus either 'file' (Gemini – the
+	 * result is already on disk) or 'handle' (deAPI – poll it), or WP_Error when every engine failed.
+	 */
+	public static function enhance_start( $input, $dir = '' ) {
+		$order = self::enhance_order();
+		if ( ! $order ) {
+			return new WP_Error( 'ofp_engine', 'שיפור בפרומפט דורש מפתח Gemini או deAPI' );
+		}
+		$notes = array();
+		foreach ( $order as $engine ) {
+			$res = 'gemini' === $engine ? self::gemini_enhance( $input, $dir ) : self::deapi_enhance_start( $input );
+			if ( ! is_wp_error( $res ) ) {
+				$res['engine'] = $engine;
+				$res['notes']  = $notes;
+				return $res;
+			}
+			$notes[] = self::enhance_label( $engine ) . ': ' . preg_replace( '/^(Gemini|deAPI)[ :]+/u', '', $res->get_error_message() );
+		}
+		return new WP_Error( 'ofp_engine', implode( ' · ', $notes ) );
+	}
+
+	/** deAPI Image Edit (async). Returns array( 'handle', 'width', 'height', 'model' ) or WP_Error. */
+	public static function deapi_enhance_start( $input ) {
+		if ( ! OFP_Settings::secret( 'deapi_key' ) ) {
 			return new WP_Error( 'ofp_engine', 'שיפור בפרומפט דורש מפתח deAPI' );
 		}
 		$slug  = (string) OFP_Settings::get( 'enhance_model' );
@@ -447,6 +650,16 @@ class OFP_Engines {
 	/** 'processing', a path to the enhanced image, or WP_Error. */
 	public static function enhance_poll( $handle, $dir ) {
 		return self::deapi_poll( $handle, $dir, $dir . '/enhance-raw.img' );
+	}
+
+	/** Connection-test lines for every configured enhancement engine. */
+	public static function enhance_tests() {
+		$out = array();
+		foreach ( self::enhance_order() as $i => $engine ) {
+			$t     = 'gemini' === $engine ? self::gemini_test() : self::enhance_test();
+			$out[] = ( is_wp_error( $t ) ? '❌' : '✅' ) . ' שיפור בפרומפט – ' . self::enhance_label( $engine ) . ( 0 === $i ? ' (ראשון)' : ' (גיבוי)' ) . ': ' . ( is_wp_error( $t ) ? $t->get_error_message() : $t );
+		}
+		return $out;
 	}
 
 	public static function enhance_test() {

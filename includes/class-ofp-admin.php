@@ -139,10 +139,11 @@ class OFP_Admin {
 		}
 		if ( 'off' !== OFP_Settings::get( 'enhance_mode' ) ) {
 			if ( OFP_Engines::enhance_ready() ) {
-				$t              = OFP_Engines::enhance_test();
-				$out['enhance'] = is_wp_error( $t ) ? '❌ שיפור בפרומפט: ' . $t->get_error_message() : '✅ שיפור בפרומפט (deAPI): ' . $t;
+				foreach ( OFP_Engines::enhance_tests() as $i => $line ) {
+					$out[ 'enhance' . $i ] = $line;
+				}
 			} else {
-				$out['enhance'] = '⚠️ שיפור בפרומפט: מופעל אבל אין מפתח deAPI – ידולג';
+				$out['enhance'] = '⚠️ שיפור בפרומפט: מופעל אבל אין מפתח Gemini או deAPI – ידולג';
 			}
 		} else {
 			$out['enhance'] = '— שיפור בפרומפט: כבוי';
@@ -227,8 +228,16 @@ class OFP_Admin {
 		$f( 'replicate_token', 'טוקן Replicate', 'text', 'מ-replicate.com/account/api-tokens. אפשר גם להגדיר ב-wp-config: <code>define(\'OFP_REPLICATE_TOKEN\', \'...\');</code>' );
 		$f( 'replicate_model', 'מודל Replicate', 'text', 'ברירת מחדל: <code>nightmareai/real-esrgan</code> (גרסה אחרונה נמשכת אוטומטית). אפשר לנעול גרסה: <code>owner/model:versionhash</code>' );
 		echo '</table><h2>שיפור תמונה בפרומפט (לפני ההגדלה)</h2>';
-		echo '<p class="description" style="max-width:820px">שלב נפרד ממנועי ההגדלה: מודל עריכת תמונה ב-deAPI מקבל את התמונה יחד עם הפרומפט שלמטה ומחזיר גרסה משופרת (תאורה, עומק, חדות), ורק אז היא מוגדלת ל-4K. <b>שים לב:</b> בניגוד להגדלה, זה מודל יוצר – הוא מצייר את התמונה מחדש, ולכן טקסט קטן, לוגואים ופנים עלולים להשתנות. סוכני ההגהה בודקים בדיוק את זה ומסמנים "דורש בדיקה" או "נדחה". אם השיפור נכשל או אין מפתח deAPI – ממשיכים להגדלה רגילה. משתמש במפתח deAPI שלמעלה ועולה קרדיט לכל תמונה.</p><table class="form-table">';
+		echo '<p class="description" style="max-width:820px">שלב נפרד ממנועי ההגדלה: מודל עריכת תמונה (Gemini של Google או deAPI) מקבל את התמונה יחד עם הפרומפט שלמטה ומחזיר גרסה משופרת (תאורה, עומק, חדות), ורק אז היא מוגדלת ל-4K. <b>שים לב:</b> בניגוד להגדלה, זה מודל יוצר – הוא מצייר את התמונה מחדש, ולכן טקסט קטן, לוגואים ופנים עלולים להשתנות. סוכני ההגהה בודקים בדיוק את זה ומסמנים "דורש בדיקה" או "נדחה". אם השיפור נכשל בכל המנועים או שאין מפתח – ממשיכים להגדלה רגילה. כל תמונה עולה כסף או קרדיט אצל הספק.</p><table class="form-table">';
 		echo '<tr><th>שיפור בפרומפט</th><td><select name="' . esc_attr( $n ) . '[enhance_mode]"><option value="auto" ' . selected( $o['enhance_mode'], 'auto', false ) . '>לפי סוג התמונה – רק צילומים עם אדם (מומלץ)</option><option value="on" ' . selected( $o['enhance_mode'], 'on', false ) . '>לכל קובץ שעולה – גם גרפיקה ולוגואים</option><option value="off" ' . selected( $o['enhance_mode'], 'off', false ) . '>כבוי – הגדלה בלבד, בלי שום שינוי בתמונה</option></select><p class="description">במצב "לפי סוג התמונה" Claude מסווג כל קובץ (צילום עם אדם / צילום בלי אדם / גרפיקה) לפני השיפור; דורש מפתח Anthropic. בבדיקה אמיתית הפרומפט החליף גרפיקה בפורטרט מומצא, ולכן "לכל קובץ" לא מומלץ. בדאשבורד "שדרוג מהיר" אפשר לכבות לכל קובץ בנפרד.</p></td></tr>';
+		echo '<tr><th>מנוע השיפור</th><td><select name="' . esc_attr( $n ) . '[enhance_engine]"><option value="auto" ' . selected( $o['enhance_engine'], 'auto', false ) . '>אוטומטי – Gemini, ואם נכשל deAPI</option><option value="gemini" ' . selected( $o['enhance_engine'], 'gemini', false ) . '>Gemini בלבד</option><option value="deapi" ' . selected( $o['enhance_engine'], 'deapi', false ) . '>deAPI בלבד</option></select><p class="description">מנוע בלי מפתח מדולג. Gemini מחזיר תוצאה בתוך שניות עד דקה; deAPI לקח בבדיקה כ-4 דקות.</p></td></tr>';
+		$f( 'gemini_key', 'מפתח Gemini', 'text', 'יוצרים ב-<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>. מודלי התמונה של Gemini בתשלום לפי תמונה – צריך חשבון עם חיוב פעיל. אפשר גם ב-wp-config: <code>define(\'OFP_GEMINI_KEY\', \'...\');</code>' );
+		$f( 'gemini_model', 'מודל Gemini', 'text', 'ברירת מחדל: <code>gemini-3.1-flash-image</code> (Nano Banana 2). לאיכות מרבית: <code>gemini-3-pro-image</code>. הזול והמהיר: <code>gemini-3.1-flash-lite-image</code> (רק 1K).' );
+		echo '<tr><th>רזולוציית הפלט של Gemini</th><td><select name="' . esc_attr( $n ) . '[gemini_size]">';
+		foreach ( array( '1K', '2K', '4K' ) as $sz ) {
+			echo '<option value="' . esc_attr( $sz ) . '" ' . selected( $o['gemini_size'], $sz, false ) . '>' . esc_html( $sz ) . '</option>';
+		}
+		echo '</select><p class="description">אחרי השיפור התמונה מוגדלת בכל מקרה ליעד (4K). רזולוציה גבוהה יותר כאן עולה יותר לתמונה.</p></td></tr>';
 		$f( 'enhance_model', 'מודל עריכה ב-deAPI', 'text', 'ברירת מחדל: <code>QwenImageEdit_Plus_NF4</code>. חלופה: מודל FLUX-2 Klein – השם המדויק מופיע ברשימת המודלים בחשבון deAPI.' );
 		echo '<tr><th><label for="ofp_enhance_prompt">הפרומפט</label></th><td><textarea class="large-text code" dir="ltr" rows="12" id="ofp_enhance_prompt" name="' . esc_attr( $n . '[enhance_prompt]' ) . '">' . esc_textarea( $o['enhance_prompt'] ) . '</textarea><p class="description">נשלח כמו שהוא עם כל תמונה. ריק = חזרה לברירת המחדל.</p></td></tr>';
 		echo '<tr><th><label for="ofp_enhance_negative">הנחיות שליליות</label></th><td><textarea class="large-text code" dir="ltr" rows="3" id="ofp_enhance_negative" name="' . esc_attr( $n . '[enhance_negative]' ) . '">' . esc_textarea( $o['enhance_negative'] ) . '</textarea></td></tr>';
