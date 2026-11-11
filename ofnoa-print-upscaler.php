@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name:       Ofnoa Print Upscaler
- * Description:       מנוע AI לשדרוג תמונות וגרפיקה ל-4K: שיפור אופציונלי לפי פרומפט (deAPI Image Edit), הגדלה ב-Real-ESRGAN (free.ai / deAPI / מחשב מקומי / Replicate, עם מעבר אוטומטי בין מנועים), דאשבורד "שדרוג מהיר" למנהל, בדיקת נאמנות אוטומטית, סוכני הגהה ובדיקת איות (Claude), והחזרה כ-PDF במייל.
- * Version:           1.4.0
+ * Description:       מנוע AI לשדרוג תמונות וגרפיקה ל-4K: שיפור אופציונלי לפי פרומפט (Gemini / deAPI), הגדלה ב-Real-ESRGAN (free.ai / deAPI / מחשב מקומי / Replicate, עם מעבר אוטומטי בין מנועים), דאשבורד "שדרוג מהיר" למנהל, בדיקת נאמנות אוטומטית, סוכני הגהה ובדיקת איות (Claude), והחזרה כ-PDF במייל.
+ * Version:           1.5.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            Ofnoacomps
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OFP_VERSION', '1.4.0' );
+define( 'OFP_VERSION', '1.5.0' );
 define( 'OFP_FILE', __FILE__ );
 define( 'OFP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'OFP_URL', plugin_dir_url( __FILE__ ) );

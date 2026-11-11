@@ -176,7 +176,7 @@ class OFP_Quick {
 		$names  = array( 'מתמלל את המקור', 'מתמלל את התוצאה', 'משווה מקור מול תוצאה', 'בודק איות ופרטי קשר', 'ההגה הראשי מסכם' );
 		$map    = array(
 			'receiving' => array( 3, 'מקבל את הקובץ…' ),
-			'queued'    => array( 8, 'מכין את הקובץ…' ),
+			'queued'    => array( 8, 'מכין את הקובץ (סיווג ושיפור בפרומפט, אם נדרש)…' ),
 			'enhancing' => array( 25, 'משפר את התמונה לפי הפרומפט (תאורה, עומק, חדות)…' ),
 			'upscaling' => array( 50, 'מגדיל ל-4K…' ),
 			'verifying' => array( 64, 'בודק נאמנות למקור…' ),
@@ -210,7 +210,7 @@ class OFP_Quick {
 		$ntxt   = '';
 		if ( $enh ) {
 			$st   = array(
-				'done'    => 'בוצע (' . ( isset( $enh['model'] ) ? $enh['model'] : '' ) . ')',
+				'done'    => 'בוצע (' . ( isset( $enh['engine'] ) ? OFP_Engines::enhance_label( $enh['engine'] ) . ' · ' : '' ) . ( isset( $enh['model'] ) ? $enh['model'] : '' ) . ')',
 				'running' => 'בתהליך',
 				'skipped' => 'דולג – ' . ( isset( $enh['error'] ) ? $enh['error'] : '' ),
 				'failed'  => 'נכשל – ' . ( isset( $enh['error'] ) ? $enh['error'] : '' ),
@@ -494,7 +494,7 @@ class OFP_Quick {
 						<span class="ofq-drop-s">PNG · JPG · WEBP · PDF · עד <?php echo esc_html( size_format( $max ) ); ?></span>
 					</label>
 					<div class="ofq-opts">
-						<label><input type="checkbox" id="ofq-enhance" <?php checked( $enh_on && $enh_ok ); ?> <?php disabled( ! $enh_ok ); ?>> שיפור AI לפי הפרומפט<?php echo 'on' === $mode ? ' (לכל קובץ)' : ' – רק כשהתמונה היא צילום עם אדם'; ?><?php echo $enh_ok ? '' : ' – <em>דורש מפתח deAPI</em>'; ?></label>
+						<label><input type="checkbox" id="ofq-enhance" <?php checked( $enh_on && $enh_ok ); ?> <?php disabled( ! $enh_ok ); ?>> שיפור AI לפי הפרומפט<?php echo 'on' === $mode ? ' (לכל קובץ)' : ' – רק כשהתמונה היא צילום עם אדם'; ?><?php echo $enh_ok ? '' : ' – <em>דורש מפתח Gemini או deAPI</em>'; ?></label>
 						<label><input type="checkbox" id="ofq-proof" <?php checked( $claude ); ?> <?php disabled( ! $claude ); ?>> הגהת סוכנים ובדיקת איות<?php echo $claude ? '' : ' – <em>דורש מפתח Anthropic</em>'; ?></label>
 						<label><input type="checkbox" id="ofq-mail"> לשלוח גם את ה-PDF במייל</label>
 					</div>
