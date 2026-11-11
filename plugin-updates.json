@@ -1,8 +1,8 @@
 {
   "name": "Ofnoa Print Upscaler",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "homepage": "https://github.com/lirish1973/ofnoa-print-upscaler",
-  "download_url": "https://github.com/lirish1973/ofnoa-print-upscaler/releases/download/v1.4.0/ofnoa-print-upscaler-1.4.0.zip",
+  "download_url": "https://github.com/lirish1973/ofnoa-print-upscaler/releases/download/v1.5.0/ofnoa-print-upscaler-1.5.0.zip",
   "tested": "6.8",
   "requires_php": "7.4",
   "description": "<p>שדרוג תמונות וגרפיקה ל-4K להדפסה: הגדלה ב-Real-ESRGAN, שיפור צילומים לפי פרומפט, סוכני הגהה, PDF ב-300DPI ודאשבורד \"שדרוג מהיר\".</p>",
