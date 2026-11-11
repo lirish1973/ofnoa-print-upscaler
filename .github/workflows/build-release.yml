@@ -1,0 +1,106 @@
+name: Build release ZIP
+
+# Same mechanism as ofnoa-carousel / ofnoa-cards / ofnoa-forms: whenever the plugin's Version header
+# changes on `main`, package a clean ZIP, publish it as a GitHub Release and update
+# plugin-updates.json so the in-plugin updater (includes/class-ofp-updater.php) offers the update.
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'plugin-updates.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read plugin version
+        id: version
+        run: |
+          VERSION=$(grep -m1 "^ \* Version:" ofnoa-print-upscaler.php | sed -E 's/.*Version:\s*//' | tr -d '[:space:]')
+          CONST=$(grep -m1 "define( 'OFP_VERSION'" ofnoa-print-upscaler.php | sed -E "s/.*'OFP_VERSION', '([^']+)'.*/\1/")
+          if [ -z "$VERSION" ] || [ "$VERSION" != "$CONST" ]; then
+            echo "::error::Version header ($VERSION) and OFP_VERSION ($CONST) do not match"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: PHP syntax check
+        run: |
+          find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Check whether a release is needed
+        id: gate
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          MANIFEST=$(node -pe "require('./plugin-updates.json').version" 2>/dev/null || echo "")
+          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q "v$VERSION"; then
+            TAG_EXISTS="true"
+          else
+            TAG_EXISTS="false"
+          fi
+          if [ "$VERSION" != "$MANIFEST" ] || [ "$TAG_EXISTS" = "false" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build plugin ZIP
+        if: steps.gate.outputs.changed == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # The folder inside the ZIP is always "ofnoa-print-upscaler", so a manual upload replaces
+          # the installed plugin instead of creating a second copy.
+          mkdir -p build/ofnoa-print-upscaler
+          rsync -a --exclude='.git' --exclude='.github' --exclude='build' \
+            --exclude='.gitignore' --exclude='node_modules' --exclude='*.zip' \
+            ./ build/ofnoa-print-upscaler/
+          cd build && zip -r "../ofnoa-print-upscaler-$VERSION.zip" ofnoa-print-upscaler -x '*.DS_Store'
+
+      - name: Create GitHub Release
+        if: steps.gate.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          files: ofnoa-print-upscaler-${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
+
+      - name: Update plugin-updates.json
+        if: steps.gate.outputs.changed == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('plugin-updates.json', 'utf8'));
+            manifest.version = '$VERSION';
+            manifest.download_url = 'https://github.com/$REPO/releases/download/v' + '$VERSION' + '/ofnoa-print-upscaler-' + '$VERSION' + '.zip';
+            fs.writeFileSync('plugin-updates.json', JSON.stringify(manifest, null, 2) + '\n');
+          "
+
+      - name: Commit updated manifest
+        if: steps.gate.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plugin-updates.json
+          if git diff --cached --quiet; then
+            echo "plugin-updates.json already up to date - nothing to commit."
+          else
+            git commit -m "chore: bump plugin-updates.json to v${{ steps.version.outputs.version }}"
+            git push
+          fi

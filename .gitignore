@@ -1,0 +1,14 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+
+# Build output
+*.zip
+/build/
+/dist/
+
+# Local environment
+.env
